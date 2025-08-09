@@ -1,0 +1,6 @@
+# Ignore large datasets and generated files
+turbine_data.csv
+data/
+outputs/
+*.parquet
+*.csv
