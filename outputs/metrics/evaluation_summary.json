@@ -1,0 +1,143 @@
+{
+  "assets": {
+    "12": {
+      "actual_events": 35,
+      "average_precision": 0.09233215735721474,
+      "evaluation_mode": "observed_labels",
+      "event_f1": 0.19639934533551556,
+      "event_precision": 0.11194029850746269,
+      "event_recall": 0.8,
+      "f1_score": 0.02501786990707648,
+      "fn": 12,
+      "fp": 2716,
+      "latency_ms_per_row": 0.3165222447190613,
+      "monitoring_path": "F:\\codes\\turbine-project\\outputs\\monitoring\\asset_12_monitoring.json",
+      "plots": {
+        "confusion_matrix": "F:\\codes\\turbine-project\\outputs\\plots\\asset_12_confusion_matrix.png",
+        "feature_scatter": "F:\\codes\\turbine-project\\outputs\\plots\\asset_12_feature_scatter.png",
+        "score_distribution": "F:\\codes\\turbine-project\\outputs\\plots\\asset_12_score_distribution.png"
+      },
+      "precision": 0.01272264631043257,
+      "predicted_events": 134,
+      "prediction_path": "F:\\codes\\turbine-project\\outputs\\predictions\\asset_12_predictions.parquet",
+      "recall": 0.7446808510638298,
+      "roc_auc": 0.6196168964871779,
+      "rows": 3457,
+      "tn": 694,
+      "tp": 35,
+      "turbine_level_correct": 1
+    },
+    "34": {
+      "actual_events": 9,
+      "average_precision": 0.5788125254958174,
+      "evaluation_mode": "observed_labels",
+      "event_f1": 0.7138810198300283,
+      "event_precision": 0.7682926829268293,
+      "event_recall": 0.6666666666666666,
+      "f1_score": 0.28517110266159695,
+      "fn": 669,
+      "fp": 83,
+      "latency_ms_per_row": 0.3768161458352821,
+      "monitoring_path": "F:\\codes\\turbine-project\\outputs\\monitoring\\asset_34_monitoring.json",
+      "plots": {
+        "confusion_matrix": "F:\\codes\\turbine-project\\outputs\\plots\\asset_34_confusion_matrix.png",
+        "feature_scatter": "F:\\codes\\turbine-project\\outputs\\plots\\asset_34_feature_scatter.png",
+        "score_distribution": "F:\\codes\\turbine-project\\outputs\\plots\\asset_34_score_distribution.png"
+      },
+      "precision": 0.6437768240343348,
+      "predicted_events": 82,
+      "prediction_path": "F:\\codes\\turbine-project\\outputs\\predictions\\asset_34_predictions.parquet",
+      "recall": 0.18315018315018314,
+      "roc_auc": 0.62324388727029,
+      "rows": 1728,
+      "tn": 826,
+      "tp": 150,
+      "turbine_level_correct": 1
+    },
+    "35": {
+      "actual_events": 7,
+      "average_precision": 0.053903156404235354,
+      "evaluation_mode": "observed_labels",
+      "event_f1": 0.11538461538461539,
+      "event_precision": 0.06666666666666667,
+      "event_recall": 0.42857142857142855,
+      "f1_score": 0.0425531914893617,
+      "fn": 10,
+      "fp": 260,
+      "latency_ms_per_row": 0.6118576615092006,
+      "monitoring_path": "F:\\codes\\turbine-project\\outputs\\monitoring\\asset_35_monitoring.json",
+      "plots": {
+        "confusion_matrix": "F:\\codes\\turbine-project\\outputs\\plots\\asset_35_confusion_matrix.png",
+        "feature_scatter": "F:\\codes\\turbine-project\\outputs\\plots\\asset_35_feature_scatter.png",
+        "score_distribution": "F:\\codes\\turbine-project\\outputs\\plots\\asset_35_score_distribution.png"
+      },
+      "precision": 0.022556390977443608,
+      "predicted_events": 45,
+      "prediction_path": "F:\\codes\\turbine-project\\outputs\\predictions\\asset_35_predictions.parquet",
+      "recall": 0.375,
+      "roc_auc": 0.6678446418955304,
+      "rows": 1873,
+      "tn": 1597,
+      "tp": 6,
+      "turbine_level_correct": 1
+    },
+    "52": {
+      "actual_events": 51,
+      "average_precision": 0.09408651630523855,
+      "evaluation_mode": "observed_labels",
+      "event_f1": 0.2663706992230855,
+      "event_precision": 0.1568627450980392,
+      "event_recall": 0.8823529411764706,
+      "f1_score": 0.05598755832037325,
+      "fn": 13,
+      "fp": 1808,
+      "latency_ms_per_row": 0.37979276033026005,
+      "monitoring_path": "F:\\codes\\turbine-project\\outputs\\monitoring\\asset_52_monitoring.json",
+      "plots": {
+        "confusion_matrix": "F:\\codes\\turbine-project\\outputs\\plots\\asset_52_confusion_matrix.png",
+        "feature_scatter": "F:\\codes\\turbine-project\\outputs\\plots\\asset_52_feature_scatter.png",
+        "score_distribution": "F:\\codes\\turbine-project\\outputs\\plots\\asset_52_score_distribution.png"
+      },
+      "precision": 0.02900107411385607,
+      "predicted_events": 102,
+      "prediction_path": "F:\\codes\\turbine-project\\outputs\\predictions\\asset_52_predictions.parquet",
+      "recall": 0.8059701492537313,
+      "roc_auc": 0.7395224687919429,
+      "rows": 3025,
+      "tn": 1150,
+      "tp": 54,
+      "turbine_level_correct": 1
+    }
+  },
+  "aws_cost_estimate_usd_per_month": 11.58,
+  "communication": {
+    "model_update_bytes": 15450532,
+    "raw_dataset_bytes": 12825716628,
+    "reduction_ratio": 0.9987953474688291
+  },
+  "feature_names": [
+    "power_2_avg",
+    "power_2_std",
+    "power_5_avg",
+    "power_6_avg",
+    "wind_speed_235_avg",
+    "wind_speed_236_avg",
+    "reactive_power_119_avg",
+    "reactive_power_120_avg",
+    "sensor_41_avg",
+    "sensor_42_avg",
+    "power_wind_ratio",
+    "wind_speed_delta",
+    "reactive_power_gap",
+    "power_band",
+    "power_rolling_mean_3",
+    "power_rolling_std_3",
+    "power_delta_1"
+  ],
+  "portfolio_summary": {
+    "assets_evaluated": 4,
+    "mean_event_f1": 0.32300891994331116,
+    "mean_row_f1": 0.10218243059460211,
+    "turbine_accuracy": 1.0
+  }
+}
