@@ -1,0 +1,2 @@
+[console_scripts]
+turbine-project = turbine_project.cli:main

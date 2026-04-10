@@ -1,28 +1,13 @@
-# scripts/fl_server.py
+from pathlib import Path
+import sys
 
-import flwr as fl
-from sklearn.ensemble import IsolationForest
-import numpy as np
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
 
-# Dummy global model parameters (initialization)
-def get_initial_parameters():
-    model = IsolationForest(n_estimators=100, contamination=0.05)
-    model.fit(np.random.rand(100, 1))  # Dummy fit to initialize
-    return model
+from turbine_project.cli import main
 
-class FedServer(fl.server.strategy.FedAvg):
-    def __init__(self):
-        super().__init__(
-            fraction_fit=1.0,
-            fraction_evaluate=1.0,
-            min_fit_clients=1,
-            min_evaluate_clients=1,
-            min_available_clients=1,
-        )
 
-print("🚀 Starting FL server...")
-fl.server.start_server(
-    server_address="0.0.0.0:8081",
-    config=fl.server.ServerConfig(num_rounds=3),
-    strategy=FedServer(),
-)
+if __name__ == "__main__":
+    main(["aggregate", *sys.argv[1:]])

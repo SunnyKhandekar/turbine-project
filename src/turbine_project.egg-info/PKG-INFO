@@ -1,0 +1,126 @@
+Metadata-Version: 2.4
+Name: turbine-project
+Version: 0.1.0
+Summary: Federated anomaly detection pipeline for wind turbine SCADA data
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: boto3>=1.42.83
+Requires-Dist: flwr>=1.28.0
+Requires-Dist: joblib>=1.5.2
+Requires-Dist: matplotlib>=3.10.8
+Requires-Dist: numpy>=2.4.4
+Requires-Dist: pandas>=3.0.2
+Requires-Dist: pyarrow>=22.0.0
+Requires-Dist: PyYAML>=6.0.3
+Requires-Dist: scikit-learn>=1.7.2
+Requires-Dist: seaborn>=0.13.2
+Requires-Dist: streamlit>=1.44.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.4.2; extra == "dev"
+
+# Turbine Project
+
+This repository contains an end-to-end anomaly detection pipeline for wind turbine SCADA data based on the document `2330664-PGDM-1.pdf`.
+
+## What is implemented
+
+- Chunked preprocessing of the raw 12.8 GB CSV into 50,000-row Parquet partitions per turbine (`asset_id`).
+- Schema validation, timestamp normalization, missing-value imputation, interpolation, and quantile clipping.
+- Local per-turbine anomaly detection using a multivariate `IsolationForest` with engineered power, wind, and reactive-power features.
+- Semi-supervised threshold calibration using operational status codes, while keeping the anomaly detector itself unsupervised.
+- Federated server-side aggregation into a manager-safe, tree-weighted FedAvg-style global ensemble model.
+- Evaluation at row, turbine, and fault-event levels using `status_type_id` discovered in the dataset (`0` healthy, non-zero fault-like states).
+- AWS Lambda inference entrypoint with optional SNS alert publishing.
+- Drift monitoring outputs, local dashboarding, Docker-based local deployment, and CI-style automation scripts.
+- Tests, config-driven execution, JSON reports, and prediction exports.
+
+## Why the implementation looks this way
+
+The PDF is internally inconsistent in two places: some sections describe an unsupervised `IsolationForest` pipeline, while a smaller implementation section references a TensorFlow binary classifier. The dominant algorithmic choice throughout the document is `IsolationForest`, so this repository treats it as the production path. For federated learning, the implementation uses a tree-weighted aggregation strategy that behaves like FedAvg at the client contribution level while respecting the realities of tree-based models.
+
+## Project structure
+
+- `configs/default.yaml`: main runtime configuration
+- `docs/executive_summary.md`: manager-facing project summary
+- `docs/architecture.md`: architecture diagrams and design rationale
+- `src/turbine_project/preprocessing.py`: chunked preprocessing
+- `src/turbine_project/feature_engineering.py`: derived physical features for explainability
+- `src/turbine_project/training.py`: local training, aggregation, evaluation
+- `src/turbine_project/dashboard.py`: local stakeholder dashboard
+- `src/turbine_project/aws_inference.py`: Lambda inference handler
+- `scripts/`: thin wrappers for common commands
+- `tests/`: unit tests
+- `deployment/aws_lambda.md`: deployment notes
+
+## Setup
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e .[dev]
+```
+
+## Run the pipeline
+
+Full run:
+
+```powershell
+.\.venv\Scripts\python -m turbine_project.cli run-all --config configs/default.yaml
+```
+
+Stage by stage:
+
+```powershell
+.\.venv\Scripts\python -m turbine_project.cli preprocess --config configs/default.yaml
+.\.venv\Scripts\python -m turbine_project.cli train --config configs/default.yaml
+.\.venv\Scripts\python -m turbine_project.cli aggregate --config configs/default.yaml
+.\.venv\Scripts\python -m turbine_project.cli evaluate --config configs/default.yaml
+```
+
+Fast validation run on a limited sample:
+
+```powershell
+.\.venv\Scripts\python -m turbine_project.cli run-all --config configs/default.yaml --max-input-chunks 2 --max-assets 2
+```
+
+Run the local dashboard:
+
+```powershell
+.\.venv\Scripts\streamlit run src/turbine_project/dashboard_entry.py
+```
+
+Run the local CI-style workflow:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/local_ci.ps1
+```
+
+Run the local Docker deployment:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/deploy_local.ps1
+```
+
+## Outputs
+
+- `data/processed/asset_id=*/chunk_*.parquet`
+- `models/local/asset_*.joblib`
+- `models/global/federated_isolation_forest.joblib`
+- `outputs/predictions/*.parquet`
+- `outputs/metrics/*.json`
+- `outputs/monitoring/*.json`
+- `outputs/dashboard/`
+- `outputs/reports/preprocessing_report.json`
+
+## Executive View
+
+- [Executive Summary](F:\codes\turbine-project\docs\executive_summary.md)
+- [Architecture Diagrams](F:\codes\turbine-project\docs\architecture.md)
+
+## Evaluation notes
+
+- The project infers `status_type_id=0` as healthy and treats non-zero states as fault-like operational events.
+- If labels are unavailable or degenerate, the pipeline falls back to synthetic anomaly injection for precision, recall, and F1 estimation.
+- Event-level precision/recall/F1 are computed from contiguous anomaly windows per turbine.
+- Communication reduction is approximated as the ratio between raw dataset size and total local model artifact size.
+- The AWS monthly cost estimate is pinned to a small EC2/Lambda footprint consistent with the PDF's sub-$12 target.

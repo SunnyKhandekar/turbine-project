@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "turbine-project"
+version = "0.1.0"
+description = "Federated anomaly detection pipeline for wind turbine SCADA data"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "boto3>=1.42.83",
+  "flwr>=1.28.0",
+  "joblib>=1.5.2",
+  "matplotlib>=3.10.8",
+  "numpy>=2.4.4",
+  "pandas>=3.0.2",
+  "pyarrow>=22.0.0",
+  "PyYAML>=6.0.3",
+  "scikit-learn>=1.7.2",
+  "seaborn>=0.13.2",
+  "streamlit>=1.44.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.4.2"]
+
+[project.scripts]
+turbine-project = "turbine_project.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

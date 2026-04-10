@@ -4,3 +4,8 @@ data/
 outputs/
 *.parquet
 *.csv
+.venv/
+__pycache__/
+*.pyc
+_pdf_extract.txt
+_pdf_pages_23_32.txt

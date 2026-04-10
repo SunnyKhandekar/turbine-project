@@ -1,0 +1,22 @@
+services:
+  pipeline:
+    build: .
+    container_name: turbine-pipeline
+    volumes:
+      - ./:/app
+    environment:
+      - PYTHONPATH=/app/src
+    command: ["python", "-m", "turbine_project.cli", "run-all", "--config", "configs/default.yaml", "--max-input-chunks", "1", "--max-assets", "2"]
+
+  dashboard:
+    build: .
+    container_name: turbine-dashboard
+    depends_on:
+      - pipeline
+    volumes:
+      - ./:/app
+    ports:
+      - "8501:8501"
+    environment:
+      - PYTHONPATH=/app/src
+    command: ["streamlit", "run", "src/turbine_project/dashboard_entry.py", "--server.address=0.0.0.0", "--server.port=8501"]

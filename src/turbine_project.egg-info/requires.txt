@@ -1,0 +1,14 @@
+boto3>=1.42.83
+flwr>=1.28.0
+joblib>=1.5.2
+matplotlib>=3.10.8
+numpy>=2.4.4
+pandas>=3.0.2
+pyarrow>=22.0.0
+PyYAML>=6.0.3
+scikit-learn>=1.7.2
+seaborn>=0.13.2
+streamlit>=1.44.0
+
+[dev]
+pytest>=8.4.2
