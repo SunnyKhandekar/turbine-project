@@ -15,7 +15,7 @@ from sklearn.preprocessing import MinMaxScaler
 
 from .config import AppConfig
 from .models.artifacts import FederatedIsolationForestEnsemble, LocalModelArtifact, load_joblib
-from .utils import ensure_directory, write_json
+from .utils import ensure_directory, portable_path, write_json
 
 LOGGER = logging.getLogger(__name__)
 
@@ -348,6 +348,7 @@ def evaluate_global_model(config: AppConfig, max_assets: int | None = None) -> d
     plots_dir = ensure_directory(config.inference.plots_dir)
     monitoring_dir = ensure_directory(config.inference.monitoring_dir)
     all_metrics: dict[str, object] = {"assets": {}, "feature_names": config.dataset.feature_columns}
+    project_root = metrics_dir.parent.parent
 
     for index, (asset_id, paths) in enumerate(asset_paths.items()):
         if max_assets is not None and index >= max_assets:
@@ -397,9 +398,9 @@ def evaluate_global_model(config: AppConfig, max_assets: int | None = None) -> d
         metrics.update(event_metrics)
         metrics["rows"] = int(len(inference_frame))
         metrics["latency_ms_per_row"] = float(latency_ms)
-        metrics["prediction_path"] = str(output_path)
-        metrics["plots"] = plot_paths
-        metrics["monitoring_path"] = str(monitoring_dir / f"asset_{asset_id}_monitoring.json")
+        metrics["prediction_path"] = portable_path(output_path, project_root)
+        metrics["plots"] = {name: portable_path(Path(path), project_root) for name, path in plot_paths.items()}
+        metrics["monitoring_path"] = portable_path(monitoring_dir / f"asset_{asset_id}_monitoring.json", project_root)
         all_metrics["assets"][asset_id] = metrics
 
     raw_data_bytes = config.dataset.csv_path.stat().st_size if config.dataset.csv_path.exists() else 0
