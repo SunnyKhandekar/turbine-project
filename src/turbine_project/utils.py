@@ -27,3 +27,18 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 def read_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def portable_path(path: Path, root: Path) -> str:
+    """Render a path relative to ``root`` using forward slashes.
+
+    Output artifacts are persisted into JSON and then read back on a
+    different machine/OS (e.g. a local Windows run deployed to Streamlit
+    Cloud on Linux). Storing an absolute, OS-specific path breaks that
+    round trip, so every path we write to a report must go through here.
+    """
+    try:
+        relative = path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return path.name
+    return relative.as_posix()
