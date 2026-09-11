@@ -1,22 +1,39 @@
 dataset:
-  csv_path: "G:/downLoads/wind-turbine-scada-data-for-early-fault-detection.csv"
+  # Path to the raw SCADA CSV. Override without editing this file via the
+  # TURBINE_CSV_PATH environment variable (useful across machines/CI/cloud).
+  csv_path: "data/raw/wind_turbine_scada.csv"
+  # "auto" sniffs the delimiter (comma, semicolon, tab, pipe) from the file
+  # itself - real-world exports such as the CARE-to-Compare dataset are
+  # semicolon-separated. Set an explicit value only if auto-detection picks
+  # the wrong one for a particular export.
+  csv_delimiter: "auto"
   processed_dir: "data/processed"
   reports_dir: "outputs/reports"
   chunk_size: 50000
+  # These are role-based, engineered features (see feature_engineering.py),
+  # not literal raw column names. Real SCADA exports number each turbine's
+  # sensors locally per file (e.g. "power_2_avg" in one export, "power_29_avg"
+  # in another for the same physical signal), so the pipeline detects columns
+  # by role/statistic and aggregates them into this fixed, portable feature
+  # set instead of hardcoding IDs from one particular file.
   feature_columns:
-    - "power_2_avg"
-    - "power_2_std"
-    - "power_5_avg"
-    - "power_6_avg"
-    - "wind_speed_235_avg"
-    - "wind_speed_236_avg"
-    - "reactive_power_119_avg"
-    - "reactive_power_120_avg"
-    - "sensor_41_avg"
-    - "sensor_42_avg"
+    - "power_avg"
+    - "power_max"
+    - "power_min"
+    - "power_std"
+    - "wind_speed_avg"
+    - "wind_speed_max"
+    - "wind_speed_min"
+    - "wind_speed_std"
+    - "reactive_power_avg"
+    - "reactive_power_max"
+    - "reactive_power_min"
+    - "reactive_power_std"
+    - "sensor_avg"
+    - "sensor_std"
     - "power_wind_ratio"
-    - "wind_speed_delta"
-    - "reactive_power_gap"
+    - "wind_speed_spread"
+    - "reactive_power_spread"
     - "power_band"
     - "power_rolling_mean_3"
     - "power_rolling_std_3"
@@ -32,21 +49,14 @@ dataset:
   low_quantile: 0.001
   high_quantile: 0.999
   event_gap_minutes: 30
+  # Only structural/metadata columns are checked by exact name; the
+  # power/wind_speed/reactive_power/sensor signals are validated by role
+  # (see preprocessing.detect_delimiter / feature_engineering.available_roles).
   min_required_columns:
     - "time_stamp"
     - "asset_id"
     - "train_test"
     - "status_type_id"
-    - "power_2_avg"
-    - "power_2_std"
-    - "power_5_avg"
-    - "power_6_avg"
-    - "wind_speed_235_avg"
-    - "wind_speed_236_avg"
-    - "reactive_power_119_avg"
-    - "reactive_power_120_avg"
-    - "sensor_41_avg"
-    - "sensor_42_avg"
 
 training:
   contamination: 0.035

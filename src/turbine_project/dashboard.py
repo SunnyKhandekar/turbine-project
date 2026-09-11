@@ -114,8 +114,8 @@ def _feature_scatter_figure(frame: pd.DataFrame, asset_id: str) -> plt.Figure:
     sample = frame.sample(min(len(frame), 5000), random_state=42)
     sns.scatterplot(
         data=sample,
-        x="wind_speed_236_avg",
-        y="power_2_avg",
+        x="wind_speed_avg",
+        y="power_avg",
         hue="anomaly_prediction",
         palette={0: "steelblue", 1: "darkorange"},
         alpha=0.6,
@@ -229,7 +229,7 @@ def run_dashboard(base_dir: str | Path = ".") -> None:
             st.warning(f"Could not load predictions for turbine {asset_id}: {exc}")
 
     image_col1, image_col2 = st.columns(2)
-    if prediction_frame is not None and {"wind_speed_236_avg", "power_2_avg", "anomaly_prediction"}.issubset(prediction_frame.columns):
+    if prediction_frame is not None and {"wind_speed_avg", "power_avg", "anomaly_prediction"}.issubset(prediction_frame.columns):
         image_col1.pyplot(_feature_scatter_figure(prediction_frame, asset_id), use_container_width=True)
     if prediction_frame is not None and "anomaly_score" in prediction_frame.columns:
         image_col2.pyplot(_score_distribution_figure(prediction_frame, asset_id), use_container_width=True)

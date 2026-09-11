@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ class DatasetConfig:
     high_quantile: float
     event_gap_minutes: int
     min_required_columns: list[str]
+    csv_delimiter: str = "auto"
 
 
 @dataclass(slots=True)
@@ -83,9 +85,14 @@ def load_config(config_path: str | Path) -> AppConfig:
     federated = raw["federated"]
     inference = raw["inference"]
 
+    # Environment variables override YAML for the values most likely to
+    # differ between machines/environments (a laptop, CI, Streamlit Cloud),
+    # without requiring a config file edit for each one.
+    csv_path = os.environ.get("TURBINE_CSV_PATH", dataset["csv_path"])
+
     return AppConfig(
         dataset=DatasetConfig(
-            csv_path=_expand_path(dataset["csv_path"]),
+            csv_path=_expand_path(csv_path),
             processed_dir=_expand_path(dataset["processed_dir"]),
             reports_dir=_expand_path(dataset["reports_dir"]),
             chunk_size=int(dataset["chunk_size"]),
@@ -102,6 +109,7 @@ def load_config(config_path: str | Path) -> AppConfig:
             high_quantile=float(dataset["high_quantile"]),
             event_gap_minutes=int(dataset["event_gap_minutes"]),
             min_required_columns=list(dataset["min_required_columns"]),
+            csv_delimiter=str(dataset.get("csv_delimiter", "auto")),
         ),
         training=TrainingConfig(
             contamination=float(training["contamination"]),
