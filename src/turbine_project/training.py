@@ -292,8 +292,8 @@ def _write_plots(asset_id: str, frame: pd.DataFrame, labels: np.ndarray | None, 
     plt.figure(figsize=(8, 6))
     sns.scatterplot(
         data=frame.sample(min(len(frame), 5000), random_state=42),
-        x="wind_speed_236_avg",
-        y="power_2_avg",
+        x="wind_speed_avg",
+        y="power_avg",
         hue="anomaly_prediction",
         palette={0: "steelblue", 1: "darkorange"},
         alpha=0.6,
