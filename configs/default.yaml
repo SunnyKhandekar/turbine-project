@@ -16,6 +16,12 @@ dataset:
   # in another for the same physical signal), so the pipeline detects columns
   # by role/statistic and aggregates them into this fixed, portable feature
   # set instead of hardcoding IDs from one particular file.
+  # temperature/rotational_speed/electrical/angle are only populated when a
+  # feature_description.csv is found next to the data (every CARE-to-Compare
+  # farm ships one) - it tells us what an anonymized "sensor_N" column
+  # actually measures, so distinct physical signals aren't blended into one
+  # meaningless average. Without it, everything not named power_*/wind_speed_*/
+  # reactive_power_* falls back into the generic "sensor" bucket.
   feature_columns:
     - "power_avg"
     - "power_max"
@@ -29,6 +35,13 @@ dataset:
     - "reactive_power_max"
     - "reactive_power_min"
     - "reactive_power_std"
+    - "temperature_avg"
+    - "temperature_std"
+    - "rotational_speed_avg"
+    - "rotational_speed_std"
+    - "electrical_avg"
+    - "electrical_std"
+    - "angle_avg"
     - "sensor_avg"
     - "sensor_std"
     - "power_wind_ratio"
