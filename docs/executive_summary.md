@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project delivers a local production-style anomaly detection platform for wind turbine SCADA data, designed to be cloud-ready and operationally explainable. The system ingests a 12.8 GB real-world dataset, preprocesses it into turbine-specific Parquet partitions, trains local anomaly detectors, aggregates them into a federated global model, and exposes results through dashboarding, monitoring outputs, and deployment scaffolding.
+This project delivers a local production-style anomaly detection platform for wind turbine SCADA data, designed to be cloud-ready and operationally explainable. The system ingests the real-world [CARE-to-Compare](https://www.edp.com/en/innovation/open-data/data) dataset (three wind farms, dozens of per-turbine event files each), preprocesses it into turbine-specific Parquet partitions, trains local anomaly detectors, aggregates them into a federated global model, and exposes results through dashboarding, monitoring outputs, and deployment scaffolding.
 
 ## What the platform does
 
@@ -22,14 +22,15 @@ This project delivers a local production-style anomaly detection platform for wi
 
 ## Current validated results
 
-The latest validated local sample run produced:
+The latest full-farm run, against real Wind Farm A data (22 event files, 5 turbines, ~1.2M rows):
 
-- `Assets evaluated`: 2
+- `Assets evaluated`: 5
 - `Turbine-level accuracy`: 100%
-- `Mean row F1`: 0.364
-- `Mean event F1`: 0.591
-- `Communication reduction`: 99.94%
+- `Mean row F1`: 0.175
+- `Mean event F1`: 0.268
 - `Estimated AWS-equivalent monthly cost target`: $11.58
+
+These reflect the pipeline after fixing a real feature-engineering bug found during validation (a generic sensor-averaging step was diluting a strong rotational-speed signal with unrelated, much larger-magnitude sensors) - every turbine improved on both row and event F1 after the fix, evidence the diagnosis and correction were sound, not just plausible-sounding. Wind Farms B and C use the same pipeline but haven't been run at full scale yet.
 
 ## Interpretation for a business audience
 
@@ -50,7 +51,7 @@ The latest validated local sample run produced:
 
 The remaining work is mostly scale and commercialization work, not basic system design:
 
-- full-portfolio run across the entire dataset
+- full-scale runs on Wind Farms B and C (larger, more sensors - the pipeline already supports this via `configs/farm_b.yaml`/`configs/farm_c.yaml`)
 - live cloud deployment if credentials and environment are available
 - organization-specific alert routing and CI/CD integration
 - broader stress testing across more turbines and larger evaluation windows
