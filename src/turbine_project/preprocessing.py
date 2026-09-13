@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import logging
 from collections import defaultdict
 from pathlib import Path
@@ -24,24 +23,41 @@ LOGGER = logging.getLogger(__name__)
 # logged warning); missing power or wind speed means the file can't
 # support anomaly detection at all.
 _REQUIRED_ROLES = {"power", "wind_speed"}
+_DELIMITER_CANDIDATES = (",", ";", "\t", "|")
+_METADATA_COLUMN_HINTS = ("time_stamp", "asset_id", "status_type_id", "train_test")
 
 
 def detect_delimiter(csv_path: Path, configured: str = "auto") -> str:
-    """Sniff the field delimiter instead of assuming comma.
+    """Pick the field delimiter that actually splits the header correctly.
 
     Real-world SCADA exports (e.g. the CARE-to-Compare dataset) are often
     semicolon-separated; assuming comma silently parses every row as one
-    giant column instead of failing loudly.
+    giant column instead of failing loudly. A wide export (Farm B has 257
+    columns, Farm C has 957) can make a fixed-size byte sample land mid-row
+    or capture too few complete lines for statistical sniffing to work
+    reliably, so this reads only the header line and scores each candidate
+    delimiter by whether it actually produces the metadata columns every
+    CARE-to-Compare file has - independent of row width.
     """
     if configured != "auto":
         return configured
     with csv_path.open("r", encoding="utf-8", errors="ignore") as handle:
-        sample = handle.read(8192)
-    try:
-        return csv.Sniffer().sniff(sample, delimiters=[",", ";", "\t", "|"]).delimiter
-    except csv.Error:
-        LOGGER.warning("Could not confidently detect a delimiter for %s; defaulting to ','", csv_path)
-        return ","
+        header_line = handle.readline()
+    best_delimiter, best_score = ",", -1
+    for delimiter in _DELIMITER_CANDIDATES:
+        columns = header_line.rstrip("\r\n").split(delimiter)
+        if len(columns) <= 1:
+            continue
+        score = sum(1 for hint in _METADATA_COLUMN_HINTS if hint in columns)
+        if score > best_score:
+            best_delimiter, best_score = delimiter, score
+    if best_score <= 0:
+        LOGGER.warning(
+            "Could not confidently detect a delimiter for %s (no expected metadata "
+            "columns found with any candidate); defaulting to ','",
+            csv_path,
+        )
+    return best_delimiter
 
 
 def _locate_feature_description(*candidate_dirs: Path) -> Path | None:
