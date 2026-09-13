@@ -1,22 +1,23 @@
 # Turbine Project
 
-This repository contains an end-to-end anomaly detection pipeline for wind turbine SCADA data based on the document `2330664-PGDM-1.pdf`.
+An end-to-end, federated anomaly detection pipeline for wind turbine SCADA data, built and validated against the real [CARE-to-Compare](https://www.edp.com/en/innovation/open-data/data) dataset (wind farms A, B, C).
 
 ## What is implemented
 
-- Chunked preprocessing of the raw 12.8 GB CSV into 50,000-row Parquet partitions per turbine (`asset_id`).
-- Schema validation, timestamp normalization, missing-value imputation, interpolation, and quantile clipping.
-- Local per-turbine anomaly detection using a multivariate `IsolationForest` with engineered power, wind, and reactive-power features.
-- Semi-supervised threshold calibration using operational status codes, while keeping the anomaly detector itself unsupervised.
+- Schema-agnostic ingestion: auto-detects the CSV delimiter and matches sensor columns by physical role/statistic (power, wind speed, reactive power) instead of hardcoded column names, so it works across exports that number sensors differently.
+- Whole-farm directory ingestion: a farm's many per-event CSVs (e.g. 22 files for Farm A) are ingested as one dataset, accumulating incrementally without overwriting prior progress.
+- Metadata-aware feature engineering: when a farm's `feature_description.csv` is present, anonymized `sensor_N` columns are grouped by what they actually measure (temperature, rotational speed, electrical, angle) instead of one undifferentiated average, and every group is standardized before aggregating so no single sensor's scale can dominate.
+- Correct healthy/fault status semantics per the dataset's own documented status codes, with ambiguous states (e.g. Idling, Derated, Other) excluded from the training baseline and from strict accuracy metrics rather than guessed either way.
+- Local per-turbine anomaly detection using a multivariate `IsolationForest`, with row-level threshold calibration and single-row prediction flicker suppressed before event-level scoring.
 - Federated server-side aggregation into a manager-safe, tree-weighted FedAvg-style global ensemble model.
-- Evaluation at row, turbine, and fault-event levels using `status_type_id` discovered in the dataset (`0` healthy, non-zero fault-like states).
+- Evaluation at row, turbine, and fault-event levels, with plain-text per-farm summary reports alongside the JSON metrics.
 - AWS Lambda inference entrypoint with optional SNS alert publishing.
-- Drift monitoring outputs, local dashboarding, Docker-based local deployment, and CI-style automation scripts.
+- Drift monitoring outputs, a Streamlit dashboard, Docker-based local deployment, and CI-style automation scripts.
 - Tests, config-driven execution, JSON reports, and prediction exports.
 
-## Why the implementation looks this way
+## Design notes
 
-The PDF is internally inconsistent in two places: some sections describe an unsupervised `IsolationForest` pipeline, while a smaller implementation section references a TensorFlow binary classifier. The dominant algorithmic choice throughout the document is `IsolationForest`, so this repository treats it as the production path. For federated learning, the implementation uses a tree-weighted aggregation strategy that behaves like FedAvg at the client contribution level while respecting the realities of tree-based models.
+`IsolationForest` is the core anomaly detector: unsupervised training on confirmed-healthy operation, with thresholds calibrated (not fit) against the dataset's real operational status codes. Federated aggregation is tree-weighted FedAvg-style rather than literal parameter averaging, since IsolationForest has no such thing as an "average tree" - it's described that way deliberately rather than overclaiming.
 
 ## Project structure
 
@@ -136,13 +137,13 @@ powershell -ExecutionPolicy Bypass -File scripts/deploy_local.ps1
 
 ## Executive View
 
-- [Executive Summary](F:\codes\turbine-project\docs\executive_summary.md)
-- [Architecture Diagrams](F:\codes\turbine-project\docs\architecture.md)
+- [Executive Summary](docs/executive_summary.md)
+- [Architecture Diagrams](docs/architecture.md)
 
 ## Evaluation notes
 
-- The project infers `status_type_id=0` as healthy and treats non-zero states as fault-like operational events.
-- If labels are unavailable or degenerate, the pipeline falls back to synthetic anomaly injection for precision, recall, and F1 estimation.
-- Event-level precision/recall/F1 are computed from contiguous anomaly windows per turbine.
-- Communication reduction is approximated as the ratio between raw dataset size and total local model artifact size.
-- The AWS monthly cost estimate is pinned to a small EC2/Lambda footprint consistent with the PDF's sub-$12 target.
+- Healthy/fault ground truth comes from `status_type_id` (`healthy_labels`/`fault_labels` in config), per the CARE-to-Compare README's documented status codes - not "anything non-zero." Statuses in neither list are ambiguous and excluded from strict metrics.
+- If a turbine's prediction window contains no confirmed ground truth at all, the pipeline falls back to synthetic anomaly injection for precision, recall, and F1 estimation (`evaluation_mode: synthetic_injection` in the metrics).
+- Event-level precision/recall/F1 are computed from contiguous anomaly windows per turbine, after suppressing predicted-anomaly runs shorter than `training.min_anomaly_run_length`.
+- Communication reduction is the ratio between total raw ingested bytes and total local model artifact size.
+- The AWS monthly cost estimate is pinned to a small EC2/Lambda footprint.
