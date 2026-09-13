@@ -83,6 +83,105 @@ def _clean_chunk(chunk: pd.DataFrame, config: DatasetConfig) -> tuple[pd.DataFra
     }
 
 
+def _validate_schema(csv_path: Path, config: DatasetConfig, delimiter: str) -> list[str]:
+    """Return the header's columns after validating structure, or raise."""
+    header = pd.read_csv(csv_path, nrows=0, sep=delimiter)
+    missing_columns = sorted(set(config.min_required_columns) - set(header.columns))
+    if missing_columns:
+        raise ValueError(f"{csv_path.name} is missing required columns: {missing_columns}")
+
+    missing_roles = _REQUIRED_ROLES - available_roles(header.columns)
+    if missing_roles:
+        raise ValueError(
+            f"{csv_path.name} has none of the required signal types: {sorted(missing_roles)}. "
+            "Expected at least one column per role matching '<role>_<id>[_avg|_max|_min|_std]', "
+            "e.g. 'power_2_avg' or 'wind_speed_3'."
+        )
+    return list(header.columns)
+
+
+class _Ingester:
+    """Accumulates cleaned rows per turbine across one or more source CSVs.
+
+    A single farm's raw data is many small per-event files, not one combined
+    CSV (e.g. 22 files for Wind Farm A). Each file can contain rows for
+    turbines already seen in a previous file, so the per-asset output chunk
+    counter must carry over across files instead of restarting at 0 - restart
+    it and a second file silently overwrites the first file's chunk_00000.
+    """
+
+    def __init__(self, config: DatasetConfig, resume: bool = True) -> None:
+        self.config = config
+        self.asset_buffers: dict[str, list[pd.DataFrame]] = defaultdict(list)
+        self.asset_rows: dict[str, int] = defaultdict(int)
+        self.asset_chunk_counts: dict[str, int] = defaultdict(int)
+        self.processed_chunks = 0
+        self.total_rows = 0
+        self.files_processed: list[str] = []
+        self.files_skipped: dict[str, str] = {}
+        if resume:
+            self._resume_chunk_counts()
+
+    def _resume_chunk_counts(self) -> None:
+        if not self.config.processed_dir.exists():
+            return
+        for asset_dir in self.config.processed_dir.glob("asset_id=*"):
+            asset_id = asset_dir.name.split("=", maxsplit=1)[1]
+            existing = sorted(asset_dir.glob("chunk_*.parquet"))
+            if existing:
+                self.asset_chunk_counts[asset_id] = len(existing)
+
+    def flush_asset(self, asset_id: str, force: bool = False) -> None:
+        if not self.asset_buffers[asset_id]:
+            return
+        frame = pd.concat(self.asset_buffers[asset_id], ignore_index=True)
+        while len(frame) >= self.config.chunk_size or (force and not frame.empty):
+            to_write = frame.iloc[: self.config.chunk_size].copy()
+            frame = frame.iloc[self.config.chunk_size :].copy()
+            asset_dir = ensure_directory(self.config.processed_dir / f"asset_id={asset_id}")
+            output_path = asset_dir / f"chunk_{self.asset_chunk_counts[asset_id]:05d}.parquet"
+            to_write.to_parquet(output_path, index=False)
+            self.asset_chunk_counts[asset_id] += 1
+            LOGGER.info("Saved %s rows for asset %s to %s", len(to_write), asset_id, output_path)
+        self.asset_buffers[asset_id] = [frame] if not frame.empty else []
+
+    def ingest_file(self, csv_path: Path, max_input_chunks: int | None = None) -> None:
+        delimiter = detect_delimiter(csv_path, self.config.csv_delimiter)
+        try:
+            _validate_schema(csv_path, self.config, delimiter)
+        except ValueError as exc:
+            LOGGER.warning("Skipping %s: %s", csv_path.name, exc)
+            self.files_skipped[csv_path.name] = str(exc)
+            return
+
+        for chunk_index, raw_chunk in enumerate(pd.read_csv(csv_path, chunksize=self.config.chunk_size, sep=delimiter)):
+            if max_input_chunks is not None and chunk_index >= max_input_chunks:
+                break
+            cleaned_chunk, metrics = _clean_chunk(raw_chunk, self.config)
+            self.processed_chunks += 1
+            self.total_rows += metrics["rows"]
+            for asset_id, asset_frame in cleaned_chunk.groupby(self.config.asset_id_column):
+                asset_id_str = str(asset_id)
+                self.asset_buffers[asset_id_str].append(asset_frame)
+                self.asset_rows[asset_id_str] += int(len(asset_frame))
+                self.flush_asset(asset_id_str)
+        self.files_processed.append(csv_path.name)
+
+    def finalize(self) -> dict[str, object]:
+        for asset_id in list(self.asset_buffers):
+            self.flush_asset(asset_id, force=True)
+        return {
+            "processed_input_chunks": self.processed_chunks,
+            "total_rows": self.total_rows,
+            "files_processed": self.files_processed,
+            "files_skipped": self.files_skipped,
+            "assets": {
+                asset_id: {"rows": self.asset_rows[asset_id], "chunks": self.asset_chunk_counts[asset_id]}
+                for asset_id in sorted(set(self.asset_rows) | set(self.asset_chunk_counts))
+            },
+        }
+
+
 def preprocess_dataset(config: DatasetConfig, max_input_chunks: int | None = None) -> dict[str, object]:
     if not config.csv_path.exists():
         raise FileNotFoundError(f"Dataset not found: {config.csv_path}")
@@ -90,68 +189,48 @@ def preprocess_dataset(config: DatasetConfig, max_input_chunks: int | None = Non
     ensure_directory(config.processed_dir)
     ensure_directory(config.reports_dir)
 
-    delimiter = detect_delimiter(config.csv_path, config.csv_delimiter)
-    header = pd.read_csv(config.csv_path, nrows=0, sep=delimiter)
-    missing_columns = sorted(set(config.min_required_columns) - set(header.columns))
-    if missing_columns:
-        raise ValueError(f"Dataset is missing required columns: {missing_columns}")
+    ingester = _Ingester(config, resume=False)
+    ingester.ingest_file(config.csv_path, max_input_chunks=max_input_chunks)
+    if config.csv_path.name in ingester.files_skipped:
+        raise ValueError(ingester.files_skipped[config.csv_path.name])
 
-    missing_roles = _REQUIRED_ROLES - available_roles(header.columns)
-    if missing_roles:
-        raise ValueError(
-            f"Dataset has none of the required signal types: {sorted(missing_roles)}. "
-            "Expected at least one column per role matching '<role>_<id>[_avg|_max|_min|_std]', "
-            "e.g. 'power_2_avg' or 'wind_speed_3'."
-        )
+    report = {"csv_path": str(config.csv_path), "chunk_size": config.chunk_size, "feature_columns": config.feature_columns}
+    report.update(ingester.finalize())
+    write_json(config.reports_dir / "preprocessing_report.json", report)
+    return report
 
-    asset_buffers: dict[str, list[pd.DataFrame]] = defaultdict(list)
-    asset_rows: dict[str, int] = defaultdict(int)
-    asset_chunk_counts: dict[str, int] = defaultdict(int)
-    total_rows = 0
-    processed_chunks = 0
-    report = {
-        "csv_path": str(config.csv_path),
-        "chunk_size": config.chunk_size,
-        "feature_columns": config.feature_columns,
-        "assets": {},
-        "processed_input_chunks": 0,
-        "total_rows": 0,
-    }
 
-    def flush_asset(asset_id: str, force: bool = False) -> None:
-        if not asset_buffers[asset_id]:
-            return
-        frame = pd.concat(asset_buffers[asset_id], ignore_index=True)
-        while len(frame) >= config.chunk_size or (force and not frame.empty):
-            to_write = frame.iloc[: config.chunk_size].copy()
-            frame = frame.iloc[config.chunk_size :].copy()
-            asset_dir = ensure_directory(config.processed_dir / f"asset_id={asset_id}")
-            output_path = asset_dir / f"chunk_{asset_chunk_counts[asset_id]:05d}.parquet"
-            to_write.to_parquet(output_path, index=False)
-            asset_chunk_counts[asset_id] += 1
-            LOGGER.info("Saved %s rows for asset %s to %s", len(to_write), asset_id, output_path)
-        asset_buffers[asset_id] = [frame] if not frame.empty else []
+def preprocess_source_directory(
+    config: DatasetConfig,
+    source_dir: Path,
+    max_input_files: int | None = None,
+    max_input_chunks_per_file: int | None = None,
+) -> dict[str, object]:
+    """Ingest every CSV in a directory (e.g. one farm's ``datasets`` folder).
 
-    for chunk_index, raw_chunk in enumerate(pd.read_csv(config.csv_path, chunksize=config.chunk_size, sep=delimiter)):
-        if max_input_chunks is not None and chunk_index >= max_input_chunks:
-            break
-        cleaned_chunk, metrics = _clean_chunk(raw_chunk, config)
-        processed_chunks += 1
-        total_rows += metrics["rows"]
-        for asset_id, asset_frame in cleaned_chunk.groupby(config.asset_id_column):
-            asset_id_str = str(asset_id)
-            asset_buffers[asset_id_str].append(asset_frame)
-            asset_rows[asset_id_str] += int(len(asset_frame))
-            flush_asset(asset_id_str)
+    Each file's rows accumulate into the same per-turbine parquet chunks
+    (resuming existing chunk counters rather than overwriting them), so this
+    can process a whole farm's many per-event files as one dataset, and can
+    be re-run incrementally without destroying prior output.
+    """
+    if not source_dir.exists() or not source_dir.is_dir():
+        raise FileNotFoundError(f"Source directory not found: {source_dir}")
 
-    for asset_id in list(asset_buffers):
-        flush_asset(asset_id, force=True)
+    csv_paths = sorted(source_dir.glob("*.csv"))
+    if max_input_files is not None:
+        csv_paths = csv_paths[:max_input_files]
+    if not csv_paths:
+        raise FileNotFoundError(f"No CSV files found in {source_dir}")
 
-    report["processed_input_chunks"] = processed_chunks
-    report["total_rows"] = total_rows
-    report["assets"] = {
-        asset_id: {"rows": asset_rows[asset_id], "chunks": asset_chunk_counts[asset_id]}
-        for asset_id in sorted(asset_rows)
-    }
+    ensure_directory(config.processed_dir)
+    ensure_directory(config.reports_dir)
+
+    ingester = _Ingester(config, resume=True)
+    for csv_path in csv_paths:
+        LOGGER.info("Ingesting %s", csv_path)
+        ingester.ingest_file(csv_path, max_input_chunks=max_input_chunks_per_file)
+
+    report = {"source_dir": str(source_dir), "chunk_size": config.chunk_size, "feature_columns": config.feature_columns}
+    report.update(ingester.finalize())
     write_json(config.reports_dir / "preprocessing_report.json", report)
     return report
