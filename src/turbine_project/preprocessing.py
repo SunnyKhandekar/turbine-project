@@ -8,7 +8,12 @@ from pathlib import Path
 import pandas as pd
 
 from .config import DatasetConfig
-from .feature_engineering import add_engineered_features, available_roles
+from .feature_engineering import (
+    add_engineered_features,
+    available_roles,
+    build_sensor_categories,
+    load_feature_description,
+)
 from .utils import ensure_directory, write_json
 
 LOGGER = logging.getLogger(__name__)
@@ -39,7 +44,22 @@ def detect_delimiter(csv_path: Path, configured: str = "auto") -> str:
         return ","
 
 
-def _clean_chunk(chunk: pd.DataFrame, config: DatasetConfig) -> tuple[pd.DataFrame, dict[str, int]]:
+def _locate_feature_description(*candidate_dirs: Path) -> Path | None:
+    """Find a feature_description.csv near the data, checking each dir in order.
+
+    Every CARE-to-Compare farm ships one of these next to its data (either
+    beside a single file, or one level up from a farm's ``datasets`` folder).
+    """
+    for directory in candidate_dirs:
+        for candidate in directory.glob("*.csv"):
+            if candidate.name.lower() == "feature_description.csv":
+                return candidate
+    return None
+
+
+def _clean_chunk(
+    chunk: pd.DataFrame, config: DatasetConfig, sensor_categories: dict[str, str] | None = None
+) -> tuple[pd.DataFrame, dict[str, int]]:
     chunk = chunk.copy()
     chunk[config.timestamp_column] = pd.to_datetime(chunk[config.timestamp_column], errors="coerce", utc=True)
     chunk = chunk.dropna(subset=[config.timestamp_column, config.asset_id_column])
@@ -68,7 +88,7 @@ def _clean_chunk(chunk: pd.DataFrame, config: DatasetConfig) -> tuple[pd.DataFra
     # Engineered, role-based features are computed here (rather than
     # accepted as literal config.feature_columns from the raw file), so
     # they always exist regardless of which exact sensor IDs this file uses.
-    chunk = add_engineered_features(chunk, config.asset_id_column)
+    chunk = add_engineered_features(chunk, config.asset_id_column, sensor_categories)
     numeric_columns = [column for column in config.feature_columns if column in chunk.columns]
 
     low = chunk[numeric_columns].quantile(config.low_quantile)
@@ -110,8 +130,14 @@ class _Ingester:
     it and a second file silently overwrites the first file's chunk_00000.
     """
 
-    def __init__(self, config: DatasetConfig, resume: bool = True) -> None:
+    def __init__(
+        self,
+        config: DatasetConfig,
+        resume: bool = True,
+        sensor_categories: dict[str, str] | None = None,
+    ) -> None:
         self.config = config
+        self.sensor_categories = sensor_categories
         self.asset_buffers: dict[str, list[pd.DataFrame]] = defaultdict(list)
         self.asset_rows: dict[str, int] = defaultdict(int)
         self.asset_chunk_counts: dict[str, int] = defaultdict(int)
@@ -157,7 +183,7 @@ class _Ingester:
         for chunk_index, raw_chunk in enumerate(pd.read_csv(csv_path, chunksize=self.config.chunk_size, sep=delimiter)):
             if max_input_chunks is not None and chunk_index >= max_input_chunks:
                 break
-            cleaned_chunk, metrics = _clean_chunk(raw_chunk, self.config)
+            cleaned_chunk, metrics = _clean_chunk(raw_chunk, self.config, self.sensor_categories)
             self.processed_chunks += 1
             self.total_rows += metrics["rows"]
             for asset_id, asset_frame in cleaned_chunk.groupby(self.config.asset_id_column):
@@ -189,12 +215,21 @@ def preprocess_dataset(config: DatasetConfig, max_input_chunks: int | None = Non
     ensure_directory(config.processed_dir)
     ensure_directory(config.reports_dir)
 
-    ingester = _Ingester(config, resume=False)
+    description_path = _locate_feature_description(config.csv_path.parent)
+    sensor_categories = build_sensor_categories(load_feature_description(description_path) if description_path else None)
+
+    ingester = _Ingester(config, resume=False, sensor_categories=sensor_categories)
     ingester.ingest_file(config.csv_path, max_input_chunks=max_input_chunks)
     if config.csv_path.name in ingester.files_skipped:
         raise ValueError(ingester.files_skipped[config.csv_path.name])
 
-    report = {"csv_path": str(config.csv_path), "chunk_size": config.chunk_size, "feature_columns": config.feature_columns}
+    report = {
+        "csv_path": str(config.csv_path),
+        "chunk_size": config.chunk_size,
+        "feature_columns": config.feature_columns,
+        "feature_description_path": str(description_path) if description_path else None,
+        "sensor_categories": sensor_categories,
+    }
     report.update(ingester.finalize())
     write_json(config.reports_dir / "preprocessing_report.json", report)
     return report
@@ -216,7 +251,11 @@ def preprocess_source_directory(
     if not source_dir.exists() or not source_dir.is_dir():
         raise FileNotFoundError(f"Source directory not found: {source_dir}")
 
-    csv_paths = sorted(source_dir.glob("*.csv"))
+    # Metadata files (feature_description.csv, event_info.csv) sometimes sit
+    # alongside the per-event data files rather than strictly one level up -
+    # exclude them by name so they're never mistaken for turbine data.
+    _metadata_filenames = {"feature_description.csv", "event_info.csv"}
+    csv_paths = sorted(path for path in source_dir.glob("*.csv") if path.name.lower() not in _metadata_filenames)
     if max_input_files is not None:
         csv_paths = csv_paths[:max_input_files]
     if not csv_paths:
@@ -225,12 +264,33 @@ def preprocess_source_directory(
     ensure_directory(config.processed_dir)
     ensure_directory(config.reports_dir)
 
-    ingester = _Ingester(config, resume=True)
+    # A farm's feature_description.csv sits either inside the "datasets"
+    # folder itself or one level up (the layout CARE-to-Compare ships), so
+    # check both rather than assuming one.
+    description_path = _locate_feature_description(source_dir, source_dir.parent)
+    if description_path:
+        LOGGER.info("Using feature description metadata from %s", description_path)
+    else:
+        LOGGER.warning(
+            "No feature_description.csv found near %s; generic sensors will be "
+            "aggregated as one undifferentiated bucket instead of by physical meaning "
+            "(temperature/rotational speed/electrical).",
+            source_dir,
+        )
+    sensor_categories = build_sensor_categories(load_feature_description(description_path) if description_path else None)
+
+    ingester = _Ingester(config, resume=True, sensor_categories=sensor_categories)
     for csv_path in csv_paths:
         LOGGER.info("Ingesting %s", csv_path)
         ingester.ingest_file(csv_path, max_input_chunks=max_input_chunks_per_file)
 
-    report = {"source_dir": str(source_dir), "chunk_size": config.chunk_size, "feature_columns": config.feature_columns}
+    report = {
+        "source_dir": str(source_dir),
+        "chunk_size": config.chunk_size,
+        "feature_columns": config.feature_columns,
+        "feature_description_path": str(description_path) if description_path else None,
+        "sensor_categories": sensor_categories,
+    }
     report.update(ingester.finalize())
     write_json(config.reports_dir / "preprocessing_report.json", report)
     return report

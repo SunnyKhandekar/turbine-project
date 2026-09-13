@@ -71,6 +71,16 @@ file per farm), so use `--source-dir` to ingest every file in a farm's
 and `configs/farm_c.yaml` are pre-set with isolated output directories per
 farm (Farm C also uses a smaller chunk size, since it has 957 raw columns).
 
+Each farm's `feature_description.csv` (ships alongside `datasets/` in every
+CARE-to-Compare farm) is auto-detected and used to group anonymized
+"sensor_N" columns by what they actually measure (temperature, rotational
+speed, electrical) instead of blending everything into one undifferentiated
+average - this matters because those columns can span wildly different
+magnitudes (e.g. a cumulative energy meter in the hundreds of thousands vs.
+a temperature reading in the tens), and a plain average lets the
+largest-magnitude column dominate. If no `feature_description.csv` is found,
+the pipeline falls back to the generic bucket with a logged warning.
+
 ```powershell
 .\.venv\Scripts\python -m turbine_project.cli run-all `
   --config configs/farm_a.yaml `
