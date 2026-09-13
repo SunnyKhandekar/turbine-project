@@ -56,6 +56,12 @@ class TrainingConfig:
     calibration_fraction: float
     threshold_grid_size: int
     aggregation_target_estimators: int
+    # Suppresses predicted-anomaly runs shorter than this many consecutive
+    # rows (at 10-minute cadence, 3 rows = 30 minutes) before scoring or
+    # saving predictions. Real faults last for days per the CARE-to-Compare
+    # README; single-row flags are noise that fragments one true detection
+    # into hundreds of spurious "events" without this.
+    min_anomaly_run_length: int = 3
 
 
 @dataclass(slots=True)
@@ -137,6 +143,7 @@ def load_config(config_path: str | Path) -> AppConfig:
             calibration_fraction=float(training["calibration_fraction"]),
             threshold_grid_size=int(training["threshold_grid_size"]),
             aggregation_target_estimators=int(training["aggregation_target_estimators"]),
+            min_anomaly_run_length=int(training.get("min_anomaly_run_length", 3)),
         ),
         federated=FederatedConfig(
             rounds=int(federated["rounds"]),

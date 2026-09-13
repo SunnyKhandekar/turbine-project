@@ -66,6 +66,12 @@ training:
   calibration_fraction: 0.2
   threshold_grid_size: 41
   aggregation_target_estimators: 400
+  # Suppresses predicted-anomaly runs shorter than this many consecutive
+  # rows (at this dataset's 10-minute cadence, 3 rows = 30 minutes) before
+  # scoring or saving predictions. Real faults last for days, so isolated
+  # single-row flags are noise that fragments one true detection into
+  # hundreds of spurious "events" without this.
+  min_anomaly_run_length: 3
 
 federated:
   rounds: 1

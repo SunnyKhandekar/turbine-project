@@ -143,6 +143,7 @@ class _Ingester:
         self.asset_chunk_counts: dict[str, int] = defaultdict(int)
         self.processed_chunks = 0
         self.total_rows = 0
+        self.total_input_bytes = 0
         self.files_processed: list[str] = []
         self.files_skipped: dict[str, str] = {}
         if resume:
@@ -180,6 +181,7 @@ class _Ingester:
             self.files_skipped[csv_path.name] = str(exc)
             return
 
+        self.total_input_bytes += csv_path.stat().st_size
         for chunk_index, raw_chunk in enumerate(pd.read_csv(csv_path, chunksize=self.config.chunk_size, sep=delimiter)):
             if max_input_chunks is not None and chunk_index >= max_input_chunks:
                 break
@@ -199,6 +201,7 @@ class _Ingester:
         return {
             "processed_input_chunks": self.processed_chunks,
             "total_rows": self.total_rows,
+            "total_input_bytes": self.total_input_bytes,
             "files_processed": self.files_processed,
             "files_skipped": self.files_skipped,
             "assets": {
