@@ -44,8 +44,18 @@ dataset:
   label_column: "status_type_id"
   split_train_value: "train"
   split_test_value: "prediction"
+  # status_type_id semantics (per the CARE-to-Compare README):
+  #   0 Normal, 1 Derated, 2 Idling, 3 Service, 4 Downtime, 5 Other
+  # healthy_label is only the NaN-imputation fallback value.
+  # healthy_labels/fault_labels are the actual ground-truth sets used for
+  # training's healthy baseline and for strict accuracy metrics - anything
+  # in neither list (1, 2, 5 by default) is ambiguous and excluded from
+  # both, rather than assumed either way. "Idling" (2) is operationally
+  # non-faulty but deliberately left out of healthy_labels until its sensor
+  # readings are validated as resembling normal production, not guessed.
   healthy_label: 0
-  anomaly_labels: [3, 4, 5]
+  healthy_labels: [0]
+  fault_labels: [3, 4]
   low_quantile: 0.001
   high_quantile: 0.999
   event_gap_minutes: 30
