@@ -15,7 +15,7 @@ from sklearn.preprocessing import MinMaxScaler
 
 from .config import AppConfig
 from .models.artifacts import FederatedIsolationForestEnsemble, LocalModelArtifact, load_joblib
-from .utils import ensure_directory, portable_path, write_json
+from .utils import ensure_directory, portable_path, read_json, write_json
 
 LOGGER = logging.getLogger(__name__)
 
@@ -54,6 +54,29 @@ def _label_array(frame: pd.DataFrame, dataset_config) -> np.ndarray | None:
 
 def _valid_mask(labels: np.ndarray | None) -> np.ndarray | None:
     return None if labels is None else labels != -1
+
+
+def _suppress_short_runs(predictions: np.ndarray, min_run: int) -> np.ndarray:
+    """Zero out predicted-anomaly runs shorter than min_run consecutive rows.
+
+    Real faults last for days (per the CARE-to-Compare README), so an
+    isolated single-row anomaly flag is almost certainly noise, not a real
+    detection - left alone, it fragments one true fault window into hundreds
+    of spurious "events" at evaluation time without changing the underlying
+    anomaly score (roc_auc/average_precision, which use the continuous score
+    directly, are unaffected).
+    """
+    if min_run <= 1 or len(predictions) == 0:
+        return predictions
+    predictions = predictions.astype(int)
+    is_change = np.empty(len(predictions), dtype=bool)
+    is_change[0] = True
+    is_change[1:] = predictions[1:] != predictions[:-1]
+    run_id = np.cumsum(is_change)
+    run_lengths = np.bincount(run_id)[run_id]
+    result = predictions.copy()
+    result[(predictions == 1) & (run_lengths < min_run)] = 0
+    return result
 
 
 def _score_metrics(labels: np.ndarray, predictions: np.ndarray, scores: np.ndarray) -> dict[str, float]:
@@ -192,6 +215,7 @@ def _fit_local_model(train_frame: pd.DataFrame, config: AppConfig) -> tuple[Loca
         best_score = -1.0
         for candidate in candidate_thresholds:
             predictions = (calibration_scores < candidate).astype(int)
+            predictions = _suppress_short_runs(predictions, config.training.min_anomaly_run_length)
             # Row-level F1 is graded only on confirmed labels; event
             # extraction below still runs over the full (unmasked) window
             # since it defines "fault" by status code directly, and ambiguous
@@ -246,6 +270,7 @@ def train_local_models(config: AppConfig, max_assets: int | None = None) -> dict
         valid_mask = _valid_mask(calibration_labels)
         if valid_mask is not None and valid_mask.any() and len(np.unique(calibration_labels[valid_mask])) > 1:
             calibration_predictions = (calibration_scores < artifact.score_threshold).astype(int)
+            calibration_predictions = _suppress_short_runs(calibration_predictions, config.training.min_anomaly_run_length)
             calibration_metrics = _score_metrics(
                 calibration_labels[valid_mask], calibration_predictions[valid_mask], calibration_scores[valid_mask]
             )
@@ -352,6 +377,24 @@ def _write_plots(asset_id: str, frame: pd.DataFrame, labels: np.ndarray | None, 
     return outputs
 
 
+def _raw_dataset_bytes(config: AppConfig) -> int:
+    """Total raw input bytes actually ingested, for the communication-reduction metric.
+
+    Directory-mode ingestion (a whole farm's many per-event files) has no
+    single "the raw dataset" file - config.dataset.csv_path is just an
+    unused placeholder in that mode - so this reads the real total recorded
+    by preprocessing into preprocessing_report.json, falling back to
+    csv_path's size for the single-file workflow where that report field
+    isn't present.
+    """
+    report_path = config.dataset.reports_dir / "preprocessing_report.json"
+    if report_path.exists():
+        report = read_json(report_path)
+        if "total_input_bytes" in report:
+            return int(report["total_input_bytes"])
+    return config.dataset.csv_path.stat().st_size if config.dataset.csv_path.exists() else 0
+
+
 def _monitoring_summary(train_frame: pd.DataFrame, inference_frame: pd.DataFrame, feature_names: list[str]) -> dict[str, object]:
     drift_rows = []
     for feature in feature_names:
@@ -395,6 +438,7 @@ def evaluate_global_model(config: AppConfig, max_assets: int | None = None) -> d
         start = perf_counter()
         scores = ensemble.score(x_test)
         predictions = ensemble.predict(x_test)
+        predictions = _suppress_short_runs(predictions, config.training.min_anomaly_run_length)
         latency_ms = ((perf_counter() - start) / max(len(inference_frame), 1)) * 1000
         inference_frame["anomaly_score"] = scores
         inference_frame["anomaly_prediction"] = predictions
@@ -441,7 +485,7 @@ def evaluate_global_model(config: AppConfig, max_assets: int | None = None) -> d
         metrics["monitoring_path"] = portable_path(monitoring_dir / f"asset_{asset_id}_monitoring.json", project_root)
         all_metrics["assets"][asset_id] = metrics
 
-    raw_data_bytes = config.dataset.csv_path.stat().st_size if config.dataset.csv_path.exists() else 0
+    raw_data_bytes = _raw_dataset_bytes(config)
     local_model_paths = list((config.training.model_dir / "local").glob("asset_*.joblib"))
     communication_bytes = sum(path.stat().st_size for path in local_model_paths if path.exists())
     turbine_correct = [asset_metrics["turbine_level_correct"] for asset_metrics in all_metrics["assets"].values() if asset_metrics["turbine_level_correct"] is not None]
