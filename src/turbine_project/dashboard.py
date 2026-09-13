@@ -15,6 +15,35 @@ def _read_json(path: Path) -> dict:
         return json.load(handle)
 
 
+# Each farm's pipeline run writes to its own directory tree (see
+# configs/farm_a.yaml etc.) rather than one shared "outputs/" folder, since
+# they're independent datasets evaluated separately. The dashboard offers a
+# selector across whichever of these actually have committed results, so it
+# always reflects real runs rather than one hardcoded default.
+_FARMS = {
+    "Wind Farm A": {
+        "metrics": "outputs/farm_a/metrics/evaluation_summary.json",
+        "predictions_dir": "outputs/farm_a/predictions",
+        "profile": "outputs/reports/farm_a/dataset_profile.json",
+    },
+    "Wind Farm B": {
+        "metrics": "outputs/farm_b/metrics/evaluation_summary.json",
+        "predictions_dir": "outputs/farm_b/predictions",
+        "profile": "outputs/reports/farm_b/dataset_profile.json",
+    },
+    "Wind Farm C": {
+        "metrics": "outputs/farm_c/metrics/evaluation_summary.json",
+        "predictions_dir": "outputs/farm_c/predictions",
+        "profile": "outputs/reports/farm_c/dataset_profile.json",
+    },
+    "Portfolio Demo (legacy sample)": {
+        "metrics": "outputs/metrics/evaluation_summary.json",
+        "predictions_dir": "outputs/predictions",
+        "profile": "outputs/reports/dataset_profile.json",
+    },
+}
+
+
 def _resolve_output_path(root: Path, stored_path: str | None) -> Path | None:
     """Resolve a path recorded in a metrics report against this deployment.
 
@@ -143,20 +172,31 @@ def _confusion_matrix_figure(metrics: dict, asset_id: str) -> plt.Figure | None:
 
 def run_dashboard(base_dir: str | Path = ".") -> None:
     root = Path(base_dir).resolve()
-    metrics_path = root / "outputs" / "metrics" / "evaluation_summary.json"
-    profile_path = root / "outputs" / "reports" / "dataset_profile.json"
-    if not metrics_path.exists():
-        st.error(f"Missing evaluation summary at {metrics_path}")
+    st.set_page_config(page_title="Wind Turbine Anomaly Platform", layout="wide")
+
+    available_farms = {label: cfg for label, cfg in _FARMS.items() if (root / cfg["metrics"]).exists()}
+    if not available_farms:
+        st.error("No evaluation summary found for any farm. Run the pipeline (see README) before loading this dashboard.")
         return
+
+    st.title("Wind Turbine Anomaly Detection Platform")
+    st.caption("Executive dashboard for local production-style validation, turbine operations review, and interview/demo walkthroughs.")
+
+    if len(available_farms) > 1:
+        farm_label = st.selectbox("Select wind farm", options=list(available_farms.keys()))
+    else:
+        farm_label = next(iter(available_farms))
+        st.caption(f"Showing: {farm_label}")
+    farm_cfg = available_farms[farm_label]
+
+    metrics_path = root / farm_cfg["metrics"]
+    profile_path = root / farm_cfg["profile"]
+    predictions_dir = root / farm_cfg["predictions_dir"]
 
     summary = _read_json(metrics_path)
     profile = _read_json(profile_path) if profile_path.exists() else {}
     portfolio = summary.get("portfolio_summary", {})
     comms = summary.get("communication", {})
-
-    st.set_page_config(page_title="Wind Turbine Anomaly Platform", layout="wide")
-    st.title("Wind Turbine Anomaly Detection Platform")
-    st.caption("Executive dashboard for local production-style validation, turbine operations review, and interview/demo walkthroughs.")
 
     hero1, hero2, hero3, hero4 = st.columns(4)
     hero1.metric("Assets Evaluated", portfolio.get("assets_evaluated", 0))
@@ -219,7 +259,7 @@ def run_dashboard(base_dir: str | Path = ".") -> None:
     )
 
     prediction_path = _resolve_output_path(root, asset_metrics.get("prediction_path")) or (
-        root / "outputs" / "predictions" / f"asset_{asset_id}_predictions.parquet"
+        predictions_dir / f"asset_{asset_id}_predictions.parquet"
     )
     prediction_frame = None
     if prediction_path.exists():
