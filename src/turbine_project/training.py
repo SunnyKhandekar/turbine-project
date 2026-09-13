@@ -34,11 +34,26 @@ def _load_asset_frame(paths: list[Path]) -> pd.DataFrame:
     return frame.sort_values("time_stamp").reset_index(drop=True)
 
 
-def _label_array(frame: pd.DataFrame, healthy_label: int) -> np.ndarray | None:
+def _label_array(frame: pd.DataFrame, dataset_config) -> np.ndarray | None:
+    """Return per-row ground truth: 0 healthy, 1 fault, -1 ambiguous/unknown.
+
+    Only status_type_id values in dataset_config.healthy_labels/fault_labels
+    have confirmed ground truth; everything else (e.g. "Idling", "Other")
+    is -1 and is excluded from the training healthy baseline and from
+    strict accuracy metrics by callers, rather than guessed either way.
+    """
     if "status_type_id" not in frame.columns:
         return None
-    labels = pd.to_numeric(frame["status_type_id"], errors="coerce").fillna(healthy_label).astype(int)
-    return (labels != healthy_label).astype(int).to_numpy()
+    fallback = dataset_config.healthy_labels[0] if dataset_config.healthy_labels else dataset_config.healthy_label
+    raw = pd.to_numeric(frame["status_type_id"], errors="coerce").fillna(fallback).astype(int)
+    labels = np.full(len(raw), -1, dtype=int)
+    labels[raw.isin(dataset_config.healthy_labels).to_numpy()] = 0
+    labels[raw.isin(dataset_config.fault_labels).to_numpy()] = 1
+    return labels
+
+
+def _valid_mask(labels: np.ndarray | None) -> np.ndarray | None:
+    return None if labels is None else labels != -1
 
 
 def _score_metrics(labels: np.ndarray, predictions: np.ndarray, scores: np.ndarray) -> dict[str, float]:
@@ -79,9 +94,13 @@ def _extract_events(
     return events
 
 
-def _event_frame(frame: pd.DataFrame, label_column: str, prediction_column: str, healthy_label: int, event_gap_minutes: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+def _event_frame(frame: pd.DataFrame, label_column: str, prediction_column: str, fault_labels: list[int], event_gap_minutes: int) -> tuple[pd.DataFrame, pd.DataFrame]:
     working = frame[["time_stamp", label_column, prediction_column]].copy()
-    working["actual_flag"] = (pd.to_numeric(working[label_column], errors="coerce").fillna(healthy_label).astype(int) != healthy_label).astype(int)
+    # A confirmed fault event window is defined only by status codes with
+    # confirmed ground truth (fault_labels), not "anything not healthy" -
+    # ambiguous statuses (e.g. Idling, Other) are simply not part of a fault
+    # window rather than silently counted as one.
+    working["actual_flag"] = pd.to_numeric(working[label_column], errors="coerce").isin(fault_labels).astype(int)
     working["pred_flag"] = working[prediction_column].astype(int)
     actual_events = _extract_events(working, "actual_flag", event_gap_minutes, "actual_start", "actual_end")
     pred_events = _extract_events(working, "pred_flag", event_gap_minutes, "pred_start", "pred_end")
@@ -93,7 +112,7 @@ def _event_metrics(frame: pd.DataFrame, config: AppConfig) -> dict[str, float]:
         frame=frame,
         label_column=config.dataset.label_column,
         prediction_column="anomaly_prediction",
-        healthy_label=config.dataset.healthy_label,
+        fault_labels=config.dataset.fault_labels,
         event_gap_minutes=config.dataset.event_gap_minutes,
     )
     if actual_events.empty and pred_events.empty:
@@ -137,8 +156,11 @@ def _calibration_split(frame: pd.DataFrame, fraction: float) -> tuple[pd.DataFra
 
 def _fit_local_model(train_frame: pd.DataFrame, config: AppConfig) -> tuple[LocalModelArtifact, pd.DataFrame]:
     feature_names = config.dataset.feature_columns
-    labels = _label_array(train_frame, config.dataset.healthy_label)
-    healthy_train = train_frame.loc[labels == 0].copy() if labels is not None and labels.sum() > 0 else train_frame.copy()
+    labels = _label_array(train_frame, config.dataset)
+    # Fit only on rows with *confirmed* healthy status - ambiguous statuses
+    # (e.g. Idling) are excluded rather than assumed to belong in the
+    # "normal" baseline the model learns from.
+    healthy_train = train_frame.loc[labels == 0].copy() if labels is not None and (labels == 1).any() else train_frame.copy()
     train_fit_frame, calibration_frame = _calibration_split(healthy_train, config.training.calibration_fraction)
     if train_fit_frame.empty:
         train_fit_frame = healthy_train.copy()
@@ -160,8 +182,9 @@ def _fit_local_model(train_frame: pd.DataFrame, config: AppConfig) -> tuple[Loca
 
     threshold = default_threshold
     calibration_pool = train_frame.iloc[-max(len(calibration_frame), 1) :].copy()
-    calibration_labels = _label_array(calibration_pool, config.dataset.healthy_label)
-    if calibration_labels is not None and len(np.unique(calibration_labels)) > 1:
+    calibration_labels = _label_array(calibration_pool, config.dataset)
+    valid_mask = _valid_mask(calibration_labels)
+    if valid_mask is not None and valid_mask.any() and len(np.unique(calibration_labels[valid_mask])) > 1:
         x_cal = calibration_pool[feature_names].to_numpy(dtype=float)
         calibration_scores = model.decision_function(scaler.transform(x_cal))
         quantiles = np.linspace(0.01, 0.25, config.training.threshold_grid_size)
@@ -169,7 +192,11 @@ def _fit_local_model(train_frame: pd.DataFrame, config: AppConfig) -> tuple[Loca
         best_score = -1.0
         for candidate in candidate_thresholds:
             predictions = (calibration_scores < candidate).astype(int)
-            row_f1 = f1_score(calibration_labels, predictions, zero_division=0)
+            # Row-level F1 is graded only on confirmed labels; event
+            # extraction below still runs over the full (unmasked) window
+            # since it defines "fault" by status code directly, and ambiguous
+            # rows simply aren't part of a fault window.
+            row_f1 = f1_score(calibration_labels[valid_mask], predictions[valid_mask], zero_division=0)
             calibration_pool["anomaly_prediction"] = predictions
             event_score = _event_metrics(calibration_pool, config)["event_f1"]
             combined = 0.6 * event_score + 0.4 * row_f1
@@ -215,10 +242,14 @@ def train_local_models(config: AppConfig, max_assets: int | None = None) -> dict
         joblib.dump(artifact, model_path)
 
         calibration_scores = artifact.score(calibration_pool[config.dataset.feature_columns].to_numpy(dtype=float))
-        calibration_labels = _label_array(calibration_pool, config.dataset.healthy_label)
-        if calibration_labels is not None and len(np.unique(calibration_labels)) > 1:
+        calibration_labels = _label_array(calibration_pool, config.dataset)
+        valid_mask = _valid_mask(calibration_labels)
+        if valid_mask is not None and valid_mask.any() and len(np.unique(calibration_labels[valid_mask])) > 1:
             calibration_predictions = (calibration_scores < artifact.score_threshold).astype(int)
-            calibration_metrics = _score_metrics(calibration_labels, calibration_predictions, calibration_scores)
+            calibration_metrics = _score_metrics(
+                calibration_labels[valid_mask], calibration_predictions[valid_mask], calibration_scores[valid_mask]
+            )
+            calibration_metrics["ambiguous_rows_excluded"] = int((~valid_mask).sum())
         else:
             calibration_metrics = {}
 
@@ -305,8 +336,9 @@ def _write_plots(asset_id: str, frame: pd.DataFrame, labels: np.ndarray | None, 
     plt.close()
 
     outputs = {"score_distribution": str(score_plot), "feature_scatter": str(feature_plot)}
-    if labels is not None and len(np.unique(labels)) > 1:
-        cm = confusion_matrix(labels, frame["anomaly_prediction"])
+    valid_mask = None if labels is None else labels != -1
+    if valid_mask is not None and valid_mask.any() and len(np.unique(labels[valid_mask])) > 1:
+        cm = confusion_matrix(labels[valid_mask], frame.loc[valid_mask, "anomaly_prediction"])
         cm_plot = plots_dir / f"asset_{asset_id}_confusion_matrix.png"
         plt.figure(figsize=(5, 4))
         sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=["normal", "anomaly"], yticklabels=["normal", "anomaly"])
@@ -369,11 +401,17 @@ def evaluate_global_model(config: AppConfig, max_assets: int | None = None) -> d
         output_path = predictions_dir / f"asset_{asset_id}_predictions.parquet"
         inference_frame.to_parquet(output_path, index=False)
 
-        labels = _label_array(inference_frame, config.dataset.healthy_label)
-        if labels is not None and len(np.unique(labels)) > 1:
-            metrics = _score_metrics(labels, predictions, scores)
+        labels = _label_array(inference_frame, config.dataset)
+        valid_mask = _valid_mask(labels)
+        if valid_mask is not None and valid_mask.any() and len(np.unique(labels[valid_mask])) > 1:
+            metrics = _score_metrics(labels[valid_mask], predictions[valid_mask], scores[valid_mask])
             metrics["evaluation_mode"] = "observed_labels"
-            turbine_actual = int(labels.sum() > 0)
+            metrics["ambiguous_rows_excluded"] = int((~valid_mask).sum())
+            # Turbine-level correctness still looks at every row: "did a
+            # confirmed fault occur anywhere" and "did the model flag
+            # anything anywhere" are both full-data questions, independent
+            # of which individual rows have confirmed ground truth.
+            turbine_actual = int((labels == 1).any())
             turbine_pred = int(predictions.sum() > 0)
             metrics["turbine_level_correct"] = int(turbine_actual == turbine_pred)
         else:

@@ -22,12 +22,26 @@ class DatasetConfig:
     split_train_value: str
     split_test_value: str
     healthy_label: int
-    anomaly_labels: list[int]
     low_quantile: float
     high_quantile: float
     event_gap_minutes: int
     min_required_columns: list[str]
     csv_delimiter: str = "auto"
+    # status_type_id values with confirmed ground truth. Anything not in
+    # either list (e.g. "Derated"/"Other" per the CARE-to-Compare README) is
+    # ambiguous and excluded from training's healthy baseline and from
+    # strict accuracy metrics, rather than guessed either way. "Idling" is
+    # deliberately NOT in the healthy default - operationally it isn't a
+    # fault, but its sensor readings haven't been validated as resembling
+    # normal production, so it stays excluded until that's confirmed.
+    healthy_labels: list[int] = None  # type: ignore[assignment]
+    fault_labels: list[int] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.healthy_labels is None:
+            self.healthy_labels = [0]
+        if self.fault_labels is None:
+            self.fault_labels = [3, 4]
 
 
 @dataclass(slots=True)
@@ -104,7 +118,8 @@ def load_config(config_path: str | Path) -> AppConfig:
             split_train_value=str(dataset["split_train_value"]),
             split_test_value=str(dataset["split_test_value"]),
             healthy_label=int(dataset["healthy_label"]),
-            anomaly_labels=[int(value) for value in dataset["anomaly_labels"]],
+            healthy_labels=[int(value) for value in dataset["healthy_labels"]] if "healthy_labels" in dataset else None,
+            fault_labels=[int(value) for value in dataset["fault_labels"]] if "fault_labels" in dataset else None,
             low_quantile=float(dataset["low_quantile"]),
             high_quantile=float(dataset["high_quantile"]),
             event_gap_minutes=int(dataset["event_gap_minutes"]),

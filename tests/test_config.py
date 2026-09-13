@@ -20,7 +20,8 @@ dataset:
   split_train_value: train
   split_test_value: prediction
   healthy_label: 0
-  anomaly_labels: [3, 4, 5]
+  healthy_labels: [0]
+  fault_labels: [3, 4]
   low_quantile: 0.01
   high_quantile: 0.99
   event_gap_minutes: 30
