@@ -1,0 +1,76 @@
+dataset:
+  # csv_path is unused when running with --source-dir (see README), but must
+  # still point somewhere for single-file commands like the plain
+  # "preprocess" command. Point it at one representative file, or override
+  # with TURBINE_CSV_PATH.
+  csv_path: "data/raw/farm_a/placeholder.csv"
+  csv_delimiter: "auto"
+  processed_dir: "data/processed/farm_a"
+  reports_dir: "outputs/reports/farm_a"
+  chunk_size: 50000
+  feature_columns:
+    - "power_avg"
+    - "power_max"
+    - "power_min"
+    - "power_std"
+    - "wind_speed_avg"
+    - "wind_speed_max"
+    - "wind_speed_min"
+    - "wind_speed_std"
+    - "reactive_power_avg"
+    - "reactive_power_max"
+    - "reactive_power_min"
+    - "reactive_power_std"
+    - "sensor_avg"
+    - "sensor_std"
+    - "power_wind_ratio"
+    - "wind_speed_spread"
+    - "reactive_power_spread"
+    - "power_band"
+    - "power_rolling_mean_3"
+    - "power_rolling_std_3"
+    - "power_delta_1"
+  timestamp_column: "time_stamp"
+  asset_id_column: "asset_id"
+  split_column: "train_test"
+  label_column: "status_type_id"
+  split_train_value: "train"
+  split_test_value: "prediction"
+  healthy_label: 0
+  healthy_labels: [0]
+  fault_labels: [3, 4]
+  low_quantile: 0.001
+  high_quantile: 0.999
+  event_gap_minutes: 30
+  min_required_columns:
+    - "time_stamp"
+    - "asset_id"
+    - "train_test"
+    - "status_type_id"
+
+training:
+  contamination: 0.035
+  random_state: 42
+  n_estimators: 300
+  max_samples: "auto"
+  model_dir: "models/farm_a"
+  synthetic_eval_multiplier: 3.0
+  synthetic_eval_seed: 123
+  calibration_fraction: 0.2
+  threshold_grid_size: 41
+  aggregation_target_estimators: 400
+
+federated:
+  rounds: 1
+  min_clients: 1
+  server_address: "127.0.0.1:8081"
+  global_model_path: "models/farm_a/global/federated_isolation_forest.joblib"
+
+inference:
+  predictions_dir: "outputs/farm_a/predictions"
+  plots_dir: "outputs/farm_a/plots"
+  metrics_dir: "outputs/farm_a/metrics"
+  lambda_model_path: "models/farm_a/global/federated_isolation_forest.joblib"
+  sns_topic_arn: ""
+  dashboard_dir: "outputs/farm_a/dashboard"
+  monitoring_dir: "outputs/farm_a/monitoring"

@@ -63,6 +63,38 @@ Fast validation run on a limited sample:
 .\.venv\Scripts\python -m turbine_project.cli run-all --config configs/default.yaml --max-input-chunks 2 --max-assets 2
 ```
 
+## Running a full CARE-to-Compare wind farm
+
+The CARE-to-Compare dataset ships one CSV per turbine/event (not one combined
+file per farm), so use `--source-dir` to ingest every file in a farm's
+`datasets` folder in one pass. `configs/farm_a.yaml`, `configs/farm_b.yaml`,
+and `configs/farm_c.yaml` are pre-set with isolated output directories per
+farm (Farm C also uses a smaller chunk size, since it has 957 raw columns).
+
+```powershell
+.\.venv\Scripts\python -m turbine_project.cli run-all `
+  --config configs/farm_a.yaml `
+  --source-dir "F:\CARE_To_Compare\Wind Farm A\Wind Farm A\datasets" `
+  --report-txt outputs/reports/farm_a_summary.txt `
+  --farm-name "Wind Farm A"
+```
+
+Repeat with `configs/farm_b.yaml` / `configs/farm_c.yaml` and the matching
+`datasets` folder for each farm. This writes:
+- `data/processed/farm_<x>/` - cleaned per-turbine Parquet
+- `models/farm_<x>/` - local + global models
+- `outputs/farm_<x>/` - predictions, plots, monitoring, metrics JSON
+- `outputs/reports/farm_<x>_summary.txt` - the plain-text run summary
+
+Re-running `--source-dir` against the same `--config` accumulates additional
+files into existing per-turbine Parquet chunks rather than overwriting them,
+so a farm can be ingested incrementally (e.g. a handful of files at a time)
+without losing earlier progress.
+
+To ingest a single file instead of a whole directory, omit `--source-dir` and
+set `dataset.csv_path` in the config (or the `TURBINE_CSV_PATH` environment
+variable) as usual.
+
 Run the local dashboard:
 
 ```powershell
