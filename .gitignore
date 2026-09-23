@@ -9,3 +9,14 @@ __pycache__/
 *.pyc
 _pdf_extract.txt
 _pdf_pages_23_32.txt
+
+# Local Claude configuration
+.claude/
+
+# Generated full-farm model artifacts
+models/farm_a/
+models/farm_b/
+models/farm_c/
+
+# Locally generated model not part of tracked baseline
+models/local/asset_14.joblib
